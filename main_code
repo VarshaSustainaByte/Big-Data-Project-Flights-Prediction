@@ -1,0 +1,780 @@
+# Creating a Spark Session 
+
+from pyspark.sql import SparkSession
+spark = (SparkSession
+          .builder
+          .appName("flight_price_prediction")
+          .getOrCreate()
+)
+df = spark.read.csv("gs://new-flight-price-dataset/itineraries.csv", header=True, inferSchema=True)
+df.printSchema()
+# Drop the unrelevant columns from the DataFrame
+
+columns_to_drop = [
+    "fareBasisCode", 
+    "elapsedDays", 
+    "segmentsDepartureTimeEpochSeconds", 
+    "segmentsDepartureTimeRaw", 
+    "segmentsArrivalTimeEpochSeconds", 
+    "segmentsArrivalTimeRaw", 
+    "segmentsArrivalAirportCode", 
+    "segmentsDepartureAirportCode", 
+    "segmentsAirlineName", 
+    "segmentsAirlineCode", 
+    "segmentsEquipmentDescription", 
+    "segmentsDurationInSeconds", 
+    "segmentsDistance", 
+    "segmentsCabinCode"
+]
+
+# Drop the columns
+df_drop = df.drop(*columns_to_drop)
+
+# Display the schema to verify the columns were dropped
+df_drop.printSchema()
+# Steps to Exclude the Bottom 50% Routes Based on Frequency
+
+# Step 1: Calculate the frequency of each route (combination of starting and destination airports)
+route_freq = df_drop.groupBy("startingAirport", "destinationAirport").count().orderBy("count", ascending=False)
+
+# Show the result
+route_freq.show()
+route_freq.printSchema()
+# Calculate the number of distinct routes in the original dataset based on the route frequency DataFrame
+route_count = route_freq.count()
+
+# Print the result
+print(f"The number of distinct routes is: {route_count}")
+
+# Show all rows
+route_freq.show(route_count, truncate=False)
+from pyspark.sql import Window
+from pyspark.sql.functions import percent_rank
+
+# in order to fix single partition issue, need to decide the partition column
+# Assuming "startingAirport" is a logical choice for partitioning. 
+# You can update this based on your dataset characteristics.
+partition_column = "startingAirport"
+
+# Step 2: Create a window specification for calculating percentiles(with partitioning for better performance)
+window_spec = Window.partitionBy(partition_column).orderBy("count")
+
+# Step 3: Add a percentile rank column based on the route frequencies
+route_freq = route_freq.withColumn("percentile", percent_rank().over(window_spec))
+
+# Step 4: Set the threshold for the percentile to exclude (e.g., bottom 30%)
+percentile_threshold = 0.50
+
+# Step 5: Filter out routes below the threshold
+popular_routes = route_freq.filter(route_freq["percentile"] >= percentile_threshold)
+
+# Step 6: Join the filtered popular routes back to the original dataset
+df_filtered = df_drop.join(
+    popular_routes.drop("percentile"),  # Drop the percentile column after filtering
+    on=["startingAirport", "destinationAirport"],
+    how="inner"
+)
+
+# Drop the "count" column added by the join
+df_filtered = df_filtered.drop("count")
+
+# Step 7: Materialize the intermediate result to prevent recomputation
+df_filtered = df_filtered.cache()
+df_filtered.count()  # Trigger computation to materialize the DataFrame
+
+# Step 8: Show the schema and the first few rows of the filtered dataset to verify
+df_filtered.printSchema()
+df_filtered.show(5)
+# Get the number of rows in the filtered DataFrame (df_filtered)
+num_rows_filtered = df_filtered.count()
+
+# Display the number of rows
+print(f"The number of rows in the filtered DataFrame is: {num_rows_filtered}")
+# Count the number of unique flights (unique legId values)
+unique_flights_count = df_filtered.select("legId").distinct().count()
+
+# Display the result
+print(f"The number of unique flights in the dataset is: {unique_flights_count}")
+# Checking for nullable values in each column
+from pyspark.sql.functions import col, sum as spark_sum
+
+# Create a DataFrame showing the count of null values per column
+null_counts = df_filtered.select([
+    spark_sum(col(c).isNull().cast("int")).alias(c) for c in df_filtered.columns
+])
+
+# Show the result
+null_counts.show()
+from pyspark.sql.functions import avg, col, when
+
+# Calculate the average travel distance for each route (startingAirport, destinationAirport)
+route_avg_distance = df_filtered.groupBy("startingAirport", "destinationAirport") \
+                                .agg(avg("totalTravelDistance").alias("avgDistance"))
+
+# Join the original DataFrame with the route-based average distances
+df_with_avg_distance = df_filtered.join(route_avg_distance, 
+                                        on=["startingAirport", "destinationAirport"], 
+                                        how="left")
+
+# Fill in the missing totalTravelDistance values with the route-based averages
+df_filtered = df_with_avg_distance.withColumn(
+    "totalTravelDistance", 
+    when(col("totalTravelDistance").isNull(), col("avgDistance")).otherwise(col("totalTravelDistance"))
+).drop("avgDistance")
+
+# Check to ensure null values in totalTravelDistance are handled . Shows top 20 rows of values 
+df_filtered.select("totalTravelDistance").show()
+# Check for nullable values in each column after filling the missing values
+# Create a DataFrame showing the count of null values per column
+null_counts_data = df_filtered.select([
+    spark_sum(col(c).isNull().cast("int")).alias(c) for c in df_filtered.columns
+])
+
+# Show the result
+null_counts_data.show()
+#Add a new Column "days_until_flight" which is determined based on flightDate and SearchDate
+#This is done to consider one of the feature that can help determine Flight Prices
+
+from pyspark.sql.functions import datediff
+
+# Convert flightDate and searchDate columns to date type if they are not already
+df_filtered = df_filtered.withColumn("flightDate", col("flightDate").cast("date"))
+df_filtered = df_filtered.withColumn("searchDate", col("searchDate").cast("date"))
+
+# Create the days_until_flight column by calculating the difference in days
+df_filtered = df_filtered.withColumn("days_until_flight", datediff(col("flightDate"), col("searchDate")))
+
+# Show the updated DataFrame with the new column
+df_filtered.select("flightDate", "searchDate", "days_until_flight").show(5)
+#Introduce a new column with is_peak_season considering June, July, August and September 1st week as the holiday season. 
+
+from pyspark.sql.functions import month, dayofmonth
+
+# Define the peak season months
+peak_season_months = [6, 7, 8, 9] 
+
+# Extract the month and day from the 'flightDate' column
+df_filtered = df_filtered.withColumn("flight_month", month(col("flightDate"))) \
+                         .withColumn("flight_day", dayofmonth(col("flightDate")))
+
+# Flag as peak season if the month is in the peak season months (June, July, August, September)
+df_filtered = df_filtered.withColumn(
+    "is_peak_season", 
+    when(col("flight_month").isin(peak_season_months), True)
+    .otherwise(False)
+)
+
+# Considering Labor Day (first Monday in September) for the Holiday season
+df_filtered = df_filtered.withColumn(
+    "is_peak_season", 
+    when(
+        (col("flight_month").isin(peak_season_months)) | 
+        ((col("flight_month") == 9) & (col("flight_day") >= 1) & (col("flight_day") <= 7)),
+        True
+    ).otherwise(False)
+)
+
+# Show the updated DataFrame with the 'is_peak_season' flag
+df_filtered.select("flightDate", "is_peak_season").show(10)
+df_filtered.printSchema()
+# Drop the extra columns 'flight_month' and 'flight_day' that was calculated for the previous is_peak_season column
+
+df_filtered = df_filtered.drop("flight_month", "flight_day")
+
+# Show the updated DataFrame schema to verify the columns have been removed
+df_filtered.printSchema()
+# Path to save in GCP bucket
+save_path = "gs://new-flight-price-dataset/df_filtered.parquet"
+
+# Save the DataFrame to Parquet format in GCP bucket
+df_filtered.write.mode("overwrite").parquet(save_path)
+
+print(f"DataFrame saved to: {save_path}")
+# Reload the DataFrame
+# Path to the saved Parquet file in the GCP bucket
+reload_path = "gs://new-flight-price-dataset/df_filtered.parquet"
+
+# Load the DataFrame from the Parquet file
+df_filtered = spark.read.parquet(reload_path)
+
+# Verify the reload by checking the schema and row count
+df_filtered.printSchema()
+print(f"Number of rows in reloaded DataFrame: {df_filtered.count()}")
+from pyspark.sql.functions import regexp_extract, col
+
+# Step 1: Extract hours and minutes from travelDuration
+df_all = df_filtered.withColumn("hours", regexp_extract(col("travelDuration"), r"PT(\d+)H", 1).cast("int"))
+df_all = df_all.withColumn("minutes", regexp_extract(col("travelDuration"), r"(\d+)M", 1).cast("int"))
+
+# Step 2: Fill null values with 0 (if no hours or minutes are present)
+df_all = df_all.fillna({"hours": 0, "minutes": 0})
+
+# Step 3: Calculate total travel duration in minutes
+df_all = df_all.withColumn("travelDurationMinutes", (col("hours") * 60) + col("minutes"))
+
+# Step 4: Drop intermediate columns
+df_all = df_all.drop("hours", "minutes")
+
+# Step 5: Verify the transformation
+df_all.printSchema()
+df_all.select("travelDuration", "travelDurationMinutes").show(5, truncate=False)
+# Save the resulting DataFrame df_all to Parquet in GCP bucket
+save_path = "gs://new-flight-price-dataset/df_all.parquet"
+df_all.write.mode("overwrite").parquet(save_path)
+
+print(f"Transformed DataFrame saved to: {save_path}")
+# Reload the DataFrame from the Parquet file
+df_all = spark.read.parquet("gs://new-flight-price-dataset/df_all.parquet")
+
+# Verify the reload by checking the schema
+df_all.printSchema()
+# Compute basic summary statistics for numerical columns
+df_all.describe(["baseFare", "totalFare", "totalTravelDistance", "days_until_flight"]).show()
+# Calculate percentiles for the target variable totalFare
+percentiles = df_all.approxQuantile("totalFare", [0.25, 0.5, 0.75], 0.01)
+print(f"25th Percentile: {percentiles[0]}")
+print(f"Median (50th Percentile): {percentiles[1]}")
+print(f"75th Percentile: {percentiles[2]}")
+# Checking for Outliers - Calculate approximate quantiles for IQR
+q1, q3 = df_all.approxQuantile("totalFare", [0.25, 0.75], 0.01)
+iqr = q3 - q1
+lower_bound = q1 - 1.5 * iqr
+upper_bound = q3 + 1.5 * iqr
+
+print(f"IQR: {iqr}, Lower Bound: {lower_bound}, Upper Bound: {upper_bound}")
+
+# Filter out outliers
+outliers = df_all.filter((df_all["totalFare"] < lower_bound) | (df_all["totalFare"] > upper_bound))
+outliers_count = outliers.count()
+
+print(f"Number of outliers: {outliers_count}")
+from pyspark.sql.functions import col
+
+# Deduplicate dataset based on legId
+distinct_flights = df_all.dropDuplicates(["legId"])
+
+# Define the categorical columns
+boolean_columns = ["isBasicEconomy", "isRefundable", "isNonStop", "is_peak_season"]
+
+for col_name in boolean_columns:
+    print(f"Distribution of {col_name} (Distinct Flights):")
+    distinct_flights.groupBy(col_name).count().orderBy("count", ascending=False).show()
+# Count unique values in airport columns
+categorical_columns = ["startingAirport", "destinationAirport"]
+
+for col_name in categorical_columns:
+    unique_count = df_all.select(col_name).distinct().count()
+    print(f"Unique values in {col_name}: {unique_count}")
+# Count the number of distinct routes (combination of startingAirport and destinationAirport)
+distinct_routes_count = (
+    df_all.select("startingAirport", "destinationAirport")
+    .distinct()
+    .count()
+)
+
+print(f"Number of distinct routes: {distinct_routes_count}")
+from pyspark.sql.functions import col, desc
+
+# Deduplicate dataset based on legId
+distinct_flights = df_all.dropDuplicates(["legId"])
+
+# 1. Count frequency of starting airports
+starting_airport_frequency = (
+    distinct_flights.groupBy("startingAirport")
+    .count()
+    .orderBy(desc("count"))
+)
+
+print("Starting Airports by Frequency (Distinct Flights):")
+starting_airport_frequency.show(16, truncate=False)
+
+# 2. Count frequency of destination airports
+destination_airport_frequency = (
+    distinct_flights.groupBy("destinationAirport")
+    .count()
+    .orderBy(desc("count"))
+)
+
+print("Destination Airports by Frequency (Distinct Flights):")
+destination_airport_frequency.show(16, truncate=False)
+
+# 3. Count frequency of distinct routes
+route_frequency = (
+    distinct_flights.groupBy("startingAirport", "destinationAirport")
+    .count()
+    .orderBy(desc("count"))
+)
+
+print("Top 10 Routes by Frequency (Distinct Flights):")
+route_frequency.show(10, truncate=False)
+# Compute the correlation between totalFare and totalTravelDistance, seatsRemaining
+
+for col_name in ["seatsRemaining", "totalTravelDistance", "days_until_flight"]:
+    correlation = df_all.stat.corr("totalFare", col_name)
+    print(f"Correlation between totalFare and {col_name}: {correlation}")
+from pyspark.sql.functions import corr
+
+# Calculate correlation between totalTravelDistance and totalFare for each route
+route_correlation = (
+    df_all.groupBy("startingAirport", "destinationAirport")
+    .agg(corr("totalTravelDistance", "totalFare").alias("correlation"))
+    .orderBy("correlation", ascending=False)
+)
+
+# Show the results
+route_correlation.show()
+from pyspark.ml.feature import StringIndexer, OneHotEncoder
+
+# Step 1: StringIndexer for starting and destination airports
+airport_indexer = StringIndexer(inputCol="startingAirport", outputCol="startingAirportIndex")
+dest_airport_indexer = StringIndexer(inputCol="destinationAirport", outputCol="destinationAirportIndex")
+
+# Transform the data
+df_enc = airport_indexer.fit(df_all).transform(df_all)
+df_enc = dest_airport_indexer.fit(df_enc).transform(df_enc)
+
+# Step 2: OneHotEncoder for starting and destination airports
+airport_encoder = OneHotEncoder(inputCol="startingAirportIndex", outputCol="startingAirportVec")
+dest_airport_encoder = OneHotEncoder(inputCol="destinationAirportIndex", outputCol="destinationAirportVec")
+
+# Transform the data
+df_enc = airport_encoder.fit(df_enc).transform(df_enc)
+df_enc = dest_airport_encoder.fit(df_enc).transform(df_enc)
+
+# Verify the schema
+df_enc.printSchema()
+
+# Verify the transformations
+df_enc.select("startingAirport", "startingAirportIndex", "startingAirportVec").show(5, truncate=False)
+df_enc.select("destinationAirport", "destinationAirportIndex", "destinationAirportVec").show(5, truncate=False)
+from pyspark.sql.functions import col
+
+# Convert boolean columns to integer
+df_enc = df_enc.withColumn("isBasicEconomy", col("isBasicEconomy").cast("integer"))
+df_enc = df_enc.withColumn("isRefundable", col("isRefundable").cast("integer"))
+df_enc = df_enc.withColumn("isNonStop", col("isNonStop").cast("integer"))
+df_enc = df_enc.withColumn("is_peak_season", col("is_peak_season").cast("integer"))
+
+# Verify the schema after conversion
+df_enc.printSchema()
+# Save the resulting DataFrame to Parquet in GCP bucket
+enc_path = "gs://new-flight-price-dataset/df_enc.parquet"
+df_enc.write.mode("overwrite").parquet(enc_path)
+
+print(f"The Encoded DataFrame saved to: {enc_path}")
+# Reload the dataframe df_enc from the Parquet file
+
+df_enc = spark.read.parquet("gs://new-flight-price-dataset/df_enc.parquet")
+
+# Verify the reload by checking the schema and row count
+df_enc.printSchema()
+print(f"Number of rows in reloaded DataFrame: {df_enc.count()}")
+
+# Ensure the previous Spark session is stopped before creating a new one
+spark.stop()
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder \
+    .appName("flight_price_prediction") \
+    .config("spark.executor.memory", "7g") \
+    .config("spark.executor.cores", "1") \
+    .config("spark.executor.instances", "8") \
+    .config("spark.sql.shuffle.partitions", "40") \
+    .getOrCreate()
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.regression import LinearRegression
+from pyspark.ml.evaluation import RegressionEvaluator
+
+# Step 1: Define predictor columns and target column
+predictor_columns = [
+    "isBasicEconomy", "isRefundable", "isNonStop", "seatsRemaining", 
+    "totalTravelDistance", "days_until_flight", "is_peak_season", 
+    "travelDurationMinutes", "startingAirportIndex", "destinationAirportIndex"
+]
+target_column = "totalFare"
+
+# Step 2: Vectorize predictors (combine all predictor columns into one feature vector)
+vector_assembler = VectorAssembler(inputCols=predictor_columns, outputCol="features")
+df_vectorized = vector_assembler.transform(df_enc)
+
+# Step 3: Split Data into Training and Test Sets
+train_data, test_data = df_vectorized.randomSplit([0.8, 0.2], seed=42)
+
+# Step 4: Define and Train the Linear Regression Model
+lr = LinearRegression(featuresCol="features", labelCol=target_column)
+
+# Train the model
+lr_model = lr.fit(train_data)
+
+# Step 5: Evaluate the Model on the Test Set
+predictions = lr_model.transform(test_data)
+
+# Step 6: Evaluate Metrics
+evaluator_rmse = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="rmse")
+evaluator_mae = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="mae")
+evaluator_r2 = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="r2")
+
+# Calculate metrics
+rmse = evaluator_rmse.evaluate(predictions)
+mae = evaluator_mae.evaluate(predictions)
+r2 = evaluator_r2.evaluate(predictions)
+
+# Print Results
+print(f"Linear Regression RMSE: {rmse}")
+print(f"Linear Regression MAE: {mae}")
+print(f"Linear Regression R²: {r2}")
+
+# Define a function to create and save subsets
+def create_and_save_subset(df, fraction, path):
+    """
+    Creates a subset of the DataFrame based on the given fraction and saves it to a GCP bucket in Parquet format.
+    """
+    subset = df.sample(fraction=fraction, seed=42)  # Use a fixed seed for reproducibility
+    subset.write.mode("overwrite").parquet(path)
+    print(f"Subset ({fraction*100:.0f}%) saved to: {path}")
+
+# Define paths for subsets in GCP bucket
+base_path = "gs://new-flight-price-dataset/df_enc_subsets"
+paths = {
+    "10%": f"{base_path}/df_enc_10pct.parquet",
+    "25%": f"{base_path}/df_enc_25pct.parquet",
+    "50%": f"{base_path}/df_enc_50pct.parquet",
+    "75%": f"{base_path}/df_enc_75pct.parquet",
+}
+
+# Create and save subsets
+create_and_save_subset(df_enc, 0.10, paths["10%"])
+create_and_save_subset(df_enc, 0.25, paths["25%"])
+create_and_save_subset(df_enc, 0.50, paths["50%"])
+create_and_save_subset(df_enc, 0.75, paths["75%"])
+
+# Ensure the previous Spark session is stopped before creating a new one
+spark.stop()
+
+# Creating a new Spark session
+spark = SparkSession.builder \
+    .appName("flight_price_prediction") \
+    .config("spark.executor.memory", "11g") \
+    .config("spark.executor.cores", "2") \
+    .getOrCreate()
+
+# Load subset from GCP bucket
+df_10pct = spark.read.parquet("gs://new-flight-price-dataset/df_enc_subsets/df_enc_10pct.parquet")
+# Verify the schema
+df_10pct.printSchema()
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.regression import GBTRegressor
+from pyspark.ml.evaluation import RegressionEvaluator
+import time
+
+# Step 1: Define predictor columns and target column
+predictor_columns = [
+    "isBasicEconomy", "isRefundable", "isNonStop", "seatsRemaining", 
+    "totalTravelDistance", "days_until_flight", "is_peak_season", 
+    "travelDurationMinutes", "startingAirportIndex", "destinationAirportIndex"
+]
+target_column = "totalFare"
+
+# Step 2: Vectorize predictors (combine all predictor columns into one feature vector)
+vector_assembler = VectorAssembler(inputCols=predictor_columns, outputCol="features")
+df_vectorized_10pct = vector_assembler.transform(df_10pct)
+
+# Step 3: Split Data into Train and Test Sets
+train_data_10pct, test_data_10pct = df_vectorized_10pct.randomSplit([0.8, 0.2], seed=42)
+
+# Step 4: Define Gradient-Boosted Trees Regressor and parameters
+gbt = GBTRegressor(featuresCol="features", labelCol=target_column, maxIter=100, maxDepth=6, seed=42)
+
+# Step 5: Train the model and measure training time
+start_time = time.time()
+gbt_model_10pct = gbt.fit(train_data_10pct)
+training_time_10pct = time.time() - start_time
+print(f"Training Time (10% Dataset): {training_time_10pct:.2f} seconds")
+
+# Step 6: Make predictions and measure inference time
+start_time = time.time()
+predictions_10pct = gbt_model_10pct.transform(test_data_10pct)
+inference_time_10pct = time.time() - start_time
+print(f"Inference Time (10% Dataset): {inference_time_10pct:.2f} seconds")
+
+# Step 7: Evaluate Model Performance
+evaluator_rmse = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="rmse")
+evaluator_mae = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="mae")
+evaluator_r2 = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="r2")
+
+rmse_10pct = evaluator_rmse.evaluate(predictions_10pct)
+mae_10pct = evaluator_mae.evaluate(predictions_10pct)
+r2_10pct = evaluator_r2.evaluate(predictions_10pct)
+
+# Step 8: Calculate Throughput
+num_predictions_10pct = predictions_10pct.count()
+throughput_10pct = num_predictions_10pct / inference_time_10pct  # Predictions per second
+
+# Print Results
+print(f"Metrics for 10% Dataset:")
+print(f"RMSE (10% Dataset): {rmse_10pct}")
+print(f"MAE (10% Dataset): {mae_10pct}")
+print(f"R² (10% Dataset): {r2_10pct}")
+print(f"Throughput (10% Dataset): {throughput_10pct:.2f} predictions/second")
+
+# Load subset from GCP bucket
+df_25pct = spark.read.parquet("gs://new-flight-price-dataset/df_enc_subsets/df_enc_25pct.parquet")
+
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.regression import GBTRegressor
+from pyspark.ml.evaluation import RegressionEvaluator
+import time
+
+# Step 1: Define predictor columns and target column
+predictor_columns = [
+    "isBasicEconomy", "isRefundable", "isNonStop", "seatsRemaining", 
+    "totalTravelDistance", "days_until_flight", "is_peak_season", 
+    "travelDurationMinutes", "startingAirportIndex", "destinationAirportIndex"
+]
+target_column = "totalFare"
+
+# Step 2: Vectorize predictors (combine all predictor columns into one feature vector)
+vector_assembler = VectorAssembler(inputCols=predictor_columns, outputCol="features")
+df_vectorized_25pct = vector_assembler.transform(df_25pct)
+
+# Step 3: Split Data into Train and Test Sets
+train_data_25pct, test_data_25pct = df_vectorized_25pct.randomSplit([0.8, 0.2], seed=42)
+
+# Step 4: Define Gradient-Boosted Trees Regressor and parameters
+gbt = GBTRegressor(featuresCol="features", labelCol=target_column, maxIter=100, maxDepth=6, seed=42)
+
+# Step 5: Train the model and measure training time
+start_time = time.time()
+gbt_model_25pct = gbt.fit(train_data_25pct)
+training_time_25pct = time.time() - start_time
+print(f"Training Time (25% Dataset): {training_time_25pct:.2f} seconds")
+
+# Step 6: Make predictions and measure inference time
+start_time = time.time()
+predictions_25pct = gbt_model_25pct.transform(test_data_25pct)
+inference_time_25pct = time.time() - start_time
+print(f"Inference Time (25% Dataset): {inference_time_25pct:.2f} seconds")
+
+# Step 7: Evaluate Model Performance
+evaluator_rmse = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="rmse")
+evaluator_mae = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="mae")
+evaluator_r2 = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="r2")
+
+rmse_25pct = evaluator_rmse.evaluate(predictions_25pct)
+mae_25pct = evaluator_mae.evaluate(predictions_25pct)
+r2_25pct = evaluator_r2.evaluate(predictions_25pct)
+
+# Step 8: Calculate Throughput
+num_predictions_25pct = predictions_25pct.count()
+throughput_25pct = num_predictions_25pct / inference_time_25pct  # Predictions per second
+
+# Print Results
+print(f"Metrics for 25% Dataset:")
+print(f"RMSE (25% Dataset): {rmse_25pct}")
+print(f"MAE (25% Dataset): {mae_25pct}")
+print(f"R² (25% Dataset): {r2_25pct}")
+print(f"Throughput (25% Dataset): {throughput_25pct:.2f} predictions/second")
+
+# Ensure the previous Spark session is stopped before creating a new one
+spark.stop()
+
+# Creating a new Spark session
+spark = SparkSession.builder \
+    .appName("flight_price_prediction") \
+    .config("spark.executor.memory", "6g") \
+    .config("spark.executor.cores", "1") \
+    .getOrCreate()
+# Load subset from GCP bucket
+df_50pct = spark.read.parquet("gs://new-flight-price-dataset/df_enc_subsets/df_enc_50pct.parquet")
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.regression import GBTRegressor
+from pyspark.ml.evaluation import RegressionEvaluator
+import time
+
+# Step 1: Define predictor columns and target column
+predictor_columns = [
+    "isBasicEconomy", "isRefundable", "isNonStop", "seatsRemaining", 
+    "totalTravelDistance", "days_until_flight", "is_peak_season", 
+    "travelDurationMinutes", "startingAirportIndex", "destinationAirportIndex"
+]
+target_column = "totalFare"
+
+# Step 2: Vectorize predictors (combine all predictor columns into one feature vector)
+vector_assembler = VectorAssembler(inputCols=predictor_columns, outputCol="features")
+df_vectorized_50pct = vector_assembler.transform(df_50pct)
+
+# Step 3: Split Data into Train and Test Sets
+train_data_50pct, test_data_50pct = df_vectorized_50pct.randomSplit([0.8, 0.2], seed=42)
+
+# Step 4: Define Gradient-Boosted Trees Regressor and parameters
+gbt = GBTRegressor(featuresCol="features", labelCol=target_column, maxIter=100, maxDepth=6, seed=42)
+
+# Step 5: Train the model and measure training time
+start_time = time.time()
+gbt_model_50pct = gbt.fit(train_data_50pct)
+training_time_50pct = time.time() - start_time
+print(f"Training Time (50% Dataset): {training_time_50pct:.2f} seconds")
+
+# Step 6: Make predictions and measure inference time
+start_time = time.time()
+predictions_50pct = gbt_model_50pct.transform(test_data_50pct)
+inference_time_50pct = time.time() - start_time
+print(f"Inference Time (50% Dataset): {inference_time_50pct:.2f} seconds")
+
+# Step 7: Evaluate Model Performance
+evaluator_rmse = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="rmse")
+evaluator_mae = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="mae")
+evaluator_r2 = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="r2")
+
+rmse_50pct = evaluator_rmse.evaluate(predictions_50pct)
+mae_50pct = evaluator_mae.evaluate(predictions_50pct)
+r2_50pct = evaluator_r2.evaluate(predictions_50pct)
+
+# Step 8: Calculate Throughput
+num_predictions_50pct = predictions_50pct.count()
+throughput_50pct = num_predictions_50pct / inference_time_50pct  # Predictions per second
+
+# Print Results
+print(f"Metrics for 50% Dataset:")
+print(f"RMSE (50% Dataset): {rmse_50pct}")
+print(f"MAE (50% Dataset): {mae_50pct}")
+print(f"R² (50% Dataset): {r2_50pct}")
+print(f"Throughput (50% Dataset): {throughput_50pct:.2f} predictions/second")
+# Ensure the previous Spark session is stopped before creating a new one
+spark.stop()
+
+# Creating a new Spark session
+spark = SparkSession.builder \
+    .appName("flight_price_prediction") \
+    .config("spark.executor.memory", "7g") \
+    .config("spark.executor.cores", "1") \
+    .config("spark.executor.instances", "8") \
+    .config("spark.sql.shuffle.partitions", "32") \
+    .getOrCreate()
+# Load subset from GCP bucket
+df_75pct = spark.read.parquet("gs://new-flight-price-dataset/df_enc_subsets/df_enc_75pct.parquet")
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.regression import GBTRegressor
+from pyspark.ml.evaluation import RegressionEvaluator
+import time
+
+# Step 1: Define predictor columns and target column
+predictor_columns = [
+    "isBasicEconomy", "isRefundable", "isNonStop", "seatsRemaining", 
+    "totalTravelDistance", "days_until_flight", "is_peak_season", 
+    "travelDurationMinutes", "startingAirportIndex", "destinationAirportIndex"
+]
+target_column = "totalFare"
+
+# Step 2: Vectorize predictors (combine all predictor columns into one feature vector)
+vector_assembler = VectorAssembler(inputCols=predictor_columns, outputCol="features")
+df_vectorized_75pct = vector_assembler.transform(df_75pct)
+
+# Step 3: Split Data into Train and Test Sets
+train_data_75pct, test_data_75pct = df_vectorized_75pct.randomSplit([0.8, 0.2], seed=42)
+
+# Step 4: Define Gradient-Boosted Trees Regressor and parameters
+gbt = GBTRegressor(featuresCol="features", labelCol=target_column, maxIter=100, maxDepth=6, seed=42)
+
+# Step 5: Train the model and measure training time
+start_time = time.time()
+gbt_model_75pct = gbt.fit(train_data_75pct)
+training_time_75pct = time.time() - start_time
+print(f"Training Time (75% Dataset): {training_time_75pct:.2f} seconds")
+
+# Step 6: Make predictions and measure inference time
+start_time = time.time()
+predictions_75pct = gbt_model_75pct.transform(test_data_75pct)
+inference_time_75pct = time.time() - start_time
+print(f"Inference Time (75% Dataset): {inference_time_75pct:.2f} seconds")
+
+# Step 7: Evaluate Model Performance
+evaluator_rmse = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="rmse")
+evaluator_mae = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="mae")
+evaluator_r2 = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="r2")
+
+rmse_75pct = evaluator_rmse.evaluate(predictions_75pct)
+mae_75pct = evaluator_mae.evaluate(predictions_75pct)
+r2_75pct = evaluator_r2.evaluate(predictions_75pct)
+
+# Step 8: Calculate Throughput
+num_predictions_75pct = predictions_75pct.count()
+throughput_75pct = num_predictions_75pct / inference_time_75pct  # Predictions per second
+
+# Print Results
+print(f"Metrics for 75% Dataset:")
+print(f"RMSE (75% Dataset): {rmse_75pct}")
+print(f"MAE (75% Dataset): {mae_75pct}")
+print(f"R² (75% Dataset): {r2_75pct}")
+print(f"Throughput (75% Dataset): {throughput_75pct:.2f} predictions/second")
+# Ensure the previous Spark session is stopped before creating a new one
+spark.stop()
+
+# Creating a new Spark session
+
+spark = SparkSession.builder \
+    .appName("flight_price_prediction") \
+    .config("spark.executor.memory", "7g") \
+    .config("spark.executor.cores", "1") \
+    .config("spark.executor.instances", "8") \
+    .config("spark.sql.shuffle.partitions", "40") \
+    .getOrCreate()
+
+# Load dataframe from GCP bucket
+df_enc = spark.read.parquet("gs://new-flight-price-dataset/df_enc.parquet")
+
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.regression import GBTRegressor
+from pyspark.ml.evaluation import RegressionEvaluator
+import time
+
+# Step 1: Define predictor columns and target column
+predictor_columns = [
+    "isBasicEconomy", "isRefundable", "isNonStop", "seatsRemaining", 
+    "totalTravelDistance", "days_until_flight", "is_peak_season", 
+    "travelDurationMinutes", "startingAirportIndex", "destinationAirportIndex"
+]
+target_column = "totalFare"
+
+# Step 2: Vectorize predictors (combine all predictor columns into one feature vector)
+vector_assembler = VectorAssembler(inputCols=predictor_columns, outputCol="features")
+df_vectorized_100pct = vector_assembler.transform(df_enc)
+
+# Step 3: Split Data into Train and Test Sets
+train_data_100pct, test_data_100pct = df_vectorized_100pct.randomSplit([0.8, 0.2], seed=42)
+
+# Step 4: Define Gradient-Boosted Trees Regressor and parameters
+gbt = GBTRegressor(featuresCol="features", labelCol=target_column, maxIter=100, maxDepth=6, seed=42)
+
+# Step 5: Train the model and measure training time
+start_time = time.time()
+gbt_model_100pct = gbt.fit(train_data_100pct)
+training_time_100pct = time.time() - start_time
+print(f"Training Time (100% Dataset): {training_time_100pct:.2f} seconds")
+
+# Step 6: Make predictions and measure inference time
+start_time = time.time()
+predictions_100pct = gbt_model_100pct.transform(test_data_100pct)
+inference_time_100pct = time.time() - start_time
+print(f"Inference Time (100% Dataset): {inference_time_100pct:.2f} seconds")
+
+# Step 7: Evaluate Model Performance
+evaluator_rmse = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="rmse")
+evaluator_mae = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="mae")
+evaluator_r2 = RegressionEvaluator(labelCol=target_column, predictionCol="prediction", metricName="r2")
+rmse_100pct = evaluator_rmse.evaluate(predictions_100pct)
+mae_100pct = evaluator_mae.evaluate(predictions_100pct)
+r2_100pct = evaluator_r2.evaluate(predictions_100pct)
+
+# Step 8: Calculate Throughput
+num_predictions_100pct = predictions_100pct.count()
+throughput_100pct = num_predictions_100pct / inference_time_100pct  # Predictions per second
+
+# Print Results
+print(f"Metrics for 100% Dataset:")
+print(f"RMSE (100% Dataset): {rmse_100pct}")
+print(f"MAE (100% Dataset): {mae_100pct}")
+print(f"R² (100% Dataset): {r2_100pct}")
+print(f"Throughput (100% Dataset): {throughput_100pct:.2f} predictions/second")
+
+
