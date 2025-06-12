@@ -3,7 +3,8 @@ Members: Aradhana Ramamoorthy, Amber Lin & Varsha Abraham
 
 This project demonstrates end-to-end scalable data processing and machine learning for flight price prediction, leveraging Databricks and Google Cloud Platform (GCP). The pipeline processes a large dataset of U.S. flight ticket data (~53M+ rows), enabling predictive modeling at scale.
 
-Key highlights:
+
+###Key highlights:
 
 Scalable data processing with Apache Spark on Databricks
 Data storage and transformation using GCP Cloud Storage and Parquet format
