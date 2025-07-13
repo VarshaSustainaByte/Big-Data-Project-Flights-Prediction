@@ -1,47 +1,59 @@
 # Scalable Flight Price Prediction Using Big Data and Machine Learning
 
-This project focuses on building a **scalable, production-grade data pipeline** to predict flight ticket prices using over **82 million rows** of historical flight booking data from Expedia.
+This project builds a **scalable, production-ready data pipeline** to predict flight ticket prices using over **82 million** historical bookings from Expedia. It leverages **Apache Spark (PySpark)** and **Google Cloud Platform (GCP)** to demonstrate the full lifecycle of **Big Data Engineering and Machine Learning**, including:
 
-The pipeline was developed using **Apache Spark (PySpark)** on **Google Cloud Platform (GCP)** and demonstrates the full life cycle of **Big Data Engineering and Machine Learning**, including:
-
-- Ingesting and cleaning large-scale flight data.
-- Engineering meaningful features (e.g., days until flight, seasonality, route popularity).
-- Optimizing and storing the processed data in **Parquet format** on **Google Cloud Storage**.
+- Ingesting and cleaning large-scale flight booking data
+- Engineering features such as days until flight, seasonal indicators, and route popularity
+- Storing optimized datasets in **Parquet format** on **Google Cloud Storage (GCS)**.
 - Training and evaluating regression models (Linear Regression, Gradient Boosted Trees) using **Spark MLlib**.
-- Scaling the workflow across multiple dataset sizes using **Dataproc Spark clusters**.
+- Scaling the entire workflow across varying dataset sizes using **Dataproc Spark clusters**.
 
-## Key goals of the Project:
+--- 
 
-- **Travelers** make cost-effective booking decisions.
-- **Airlines** optimize pricing strategies based on seasonality and demand trends.
-- **Engineers** understand how to process and model large volumes of travel data using real-world Big Data tools.
+## Real-World Applications & Impact
+
+- Help **travelers** make cost-effective booking decisions by predicting fare trends
+- Enable **airlines** to optimize pricing strategies using demand seasonality and booking behavior
+- Empower **engineers**  and **data scientists** to build and scale predictive pipelines using real-world Big Data tools
 
 The end result is a robust, cloud-deployed pipeline capable of handling and analyzing **massive datasets** with efficiency — demonstrating expertise in **data engineering, distributed processing, and applied machine learning**.
 
-## Objectives
+---
 
-- Develop a **scalable data pipeline** to process and analyze 82 million flight records using Apache Spark on Google Cloud.
-- Engineer meaningful features (e.g., days until flight, peak season, route popularity) to support flight fare prediction.
-- Apply **supervised machine learning models** (Linear Regression, Gradient Boosted Trees) to predict flight prices.
-- Optimize the pipeline for performance and **scalability** across varying data volumes using Dataproc clusters.
-- Evaluate model accuracy using industry-standard metrics (RMSE, MAE, R²) and measure inference throughput.
-- Deliver insights to help **consumers make better booking decisions** and **airlines analyze pricing trends**.
+## Project Objectives
 
-## Dataset
+- Build a **scalable data pipeline** to process and analyze 82 million flight records using Apache Spark on Google Cloud.
+- Engineer key features such as `days until flight`, `peak season`, `route popularity` to improve fare prediction accuracy.
+- Train **supervised machine learning models** (Linear Regression, Gradient Boosted Trees) to forecast flight prices.
+- Ensure **scalability** and performance optimization across various dataset sizes using **Dataproc Spark clusters**.
+- Evaluate models using metrics like **RMSE, MAE, R²,** and benchmark **inference throughput** for production readiness.
+- Deliver insights to help **travelers book smarter** and enable **airlines to analyze fare trends more effectively**.
+
+---
+
+## Dataset Overview
 
 - **Source:** Expedia flight booking data from Kaggle  
 - **Period:** April 2022 – October 2022  
-- **Size:** Over **82 million rows** of detailed flight and fare records  
-- **Storage:** Stored as **Parquet files** on **Google Cloud Storage (GCS)** for efficient access and processing  
-- **Key Features Include:**  
-  - Departure and destination airport codes  
-  - Travel distance and duration  
-  - Number of seats remaining  
-  - Booking date vs. flight date (to calculate days until flight)  
-  - Fare details: base fare, total fare, refundability, and fare basis code  
-  - Flight type and class details  
+- **Size:** Over **82 million rows** of historical flight records  
+- **Storage Format:** Stored as **Parquet files** on **Google Cloud Storage (GCS)** for efficient quering and distributed access
+- **Key Features Include:**
+  - **Flight details:**
+    - Departure and arrival airport codes
+    - Travel distance and duration
+    - Number of seats remaining
+  - **Booking behavior:**
+    - Booking date vs. flight date (used to compute `days_until_flight`)
+    - Refundability and fare basis code
+  - **Fare components:**
+    - Base fare, total fare, and ticket class
+  - **Categorical indicators:**
+    - Flight type (non-stop, connecting)
+    - Cabin class (economy, premium, etc.)
 
-The dataset provides a rich historical record of airline bookings, enabling predictive modeling that accounts for seasonal trends, route popularity, and customer behavior.
+This dataset provides a rich and complex foundation for modeling flight fare predictions based on time, route, booking behavior, and seasonality trends.
+
+---
 
 ## Technologies Used
 
@@ -55,7 +67,11 @@ The dataset provides a rich historical record of airline bookings, enabling pred
 | **Spark MLlib**              | Machine learning library for regression model implementation |
 | **Python**                   | Scripting, data pipeline orchestration, and model evaluation |
 
-## Data Processing & Feature Engineering
+These tools were selected for their ability to handle massive datasets efficiently, support distributed computation, and deliver production-ready machine learning pipelines in the cloud.
+
+---
+
+## Data Processing & Feature Engineering at Scale
 
 - Removed irrelevant and duplicate columns such as `fareBasisCode` and `legId` to streamline data  
 - Filtered routes to keep the top 50% by frequency, improving model focus and efficiency  
@@ -67,6 +83,8 @@ The dataset provides a rich historical record of airline bookings, enabling pred
 - Encoded categorical variables (e.g., airport codes, flight type) using Spark’s `StringIndexer` and `OneHotEncoder` to prepare data for ML models  
 - Stored processed data efficiently in **Parquet format** for fast access and downstream modeling
 
+---
+
 ##  Exploratory Data Analysis (EDA)
 
 - Explored route distribution to understand travel frequency across origin-destination pairs  
@@ -77,39 +95,41 @@ The dataset provides a rich historical record of airline bookings, enabling pred
 - Identified patterns between refundable and non-refundable ticket types  
 - Discovered ~125 distinct routes and over **3.9 million** unique non-refundable flights
 
-##  Machine Learning Models
+---
+
+## Machine Learning Models
 
 This project implements two supervised regression models using **PySpark MLlib**:
 
 ### 1. Linear Regression (Baseline)
-- Interpretable model for establishing baseline performance
-- Fast training time on large datasets
-- Helps validate feature relevance and data quality
+- Interpretable model to establish baseline performance  
+- Fast training time on large datasets  
+- Validates feature relevance and data quality  
 
-**Performance on Full Dataset:**
+**Performance on Full Dataset:**  
 - RMSE: ~127.4  
 - MAE: ~81.6  
-- R²: 0.553
+- R²: 0.553  
 
 ---
 
 ### 2. Gradient Boosted Trees (Optimized)
-- Captures complex non-linear relationships between features and fare
-- Tuned for deeper trees and better generalization
-- Scaled efficiently across dataset sizes from 10% to 100%
+- Captures complex non-linear relationships between features and fare  
+- Tuned for deeper trees and better generalization  
+- Efficiently scales across dataset sizes from 10% to 100%  
 
-**Why GBT?**
-- Robust to multicollinearity and missing values
-- Performs significantly better on structured/tabular data
-- Ideal for high-cardinality categorical features like airport codes
+**Why GBT?**  
+- Robust to multicollinearity and missing values  
+- Performs significantly better on structured/tabular data  
+- Ideal for high-cardinality categorical features like airport codes  
 
-**MLlib Configs Used:**
-- `GBTRegressor(labelCol="totalFare", featuresCol="features", maxIter=50, maxDepth=5)`
-- Pipeline stages: `StringIndexer` → `OneHotEncoder` → `VectorAssembler` → `GBTRegressor`
+**MLlib Configuration:**  
+- `GBTRegressor(labelCol="totalFare", featuresCol="features", maxIter=50, maxDepth=5)`  
+- Pipeline stages: `StringIndexer` → `OneHotEncoder` → `VectorAssembler` → `GBTRegressor`  
+
+All models were trained using **Spark ML pipelines**, ensuring modularity, scalability, and reproducibility.
 
 ---
-
-All models were trained using **Spark ML pipelines**, ensuring modular, scalable, and reproducible workflows.
 
 ## Model Evaluation
 
@@ -123,26 +143,22 @@ Both models were evaluated on prediction accuracy and scalability using standard
 | 75%            | ~127.4   | ~81.7   | 0.553  | 29.8M+                       |
 | 100%           | ~127.4   | ~81.6   | 0.553  | 31.8M+                       |
 
----
-
-## Metrics Used:
+### Metrics Used:
 - **Root Mean Squared Error (RMSE):** Measures prediction error magnitude  
 - **Mean Absolute Error (MAE):** Captures average error per prediction  
 - **R² Score:** Indicates how well the model explains variance in ticket prices  
 - **Throughput:** Number of predictions per second, indicating model inference performance at scale
 
----
+### Key Takeaways:
+- GBT performance remained **consistent and stable across all dataset sizes**.
+- High inference throughput demonstrates suitability for real-time or batch deployment.
+- Slight RMSE improvement on smaller subsets likely reflects reduced variance/noise.
 
-# Key Takeaways:
-- GBT performance remained **consistent and stable across all dataset sizes**  
-- High inference throughput proves suitability for real-time or batch deployment scenarios  
-- Slight improvement in RMSE at smaller dataset subset likely due to reduced variance/noise
+---
 
 ## Scalability & Optimization
 
-To ensure performance and robustness at scale, the entire pipeline was deployed on **Google Cloud Platform (GCP)** using **Apache Spark clusters on Dataproc**.
-
----
+The entire pipeline was deployed on **Google Cloud Platform (GCP)** using **Apache Spark** clusters on Dataproc to ensure performance and robustness at scale.
 
 ### Cluster Tuning & Resource Configuration
 - Dynamically scaled clusters based on dataset size (10% → 100%)
@@ -153,108 +169,14 @@ To ensure performance and robustness at scale, the entire pipeline was deployed 
 - Enabled caching and persisted intermediate transformations where beneficial
 - Used Parquet format to accelerate read/write operations and reduce I/O overhead
 
----
-
 ### Throughput Optimization
-- Measured **inference throughput** across subsets: up to **33M+ predictions/sec**
+- Measured **inference throughput** across dataset subsets, reaching up to **33M+ predictions/sec**
 - Maintained consistent model accuracy and execution time across all dataset sizes
 - Pipeline architecture supports both **batch processing** and **future real-time scoring**
 
 ---
 
-### Highlights:
-- Demonstrates **scalable machine learning** deployment using Big Data tools
-- Applies practical **Spark tuning techniques** to optimize cloud resource usage
-- Validates end-to-end performance with real-world-sized data (82M+ records)
-
-## How to Run Locally (Sample Simulation)
-
-This project was built and executed on **Google Cloud Platform (GCP)** using **Dataproc Spark Clusters** and **Jupyter Notebooks**.  
-The following example simulates a small-scale version for local testing and learning purposes.
-
----
-
-### 1. Start a Local PySpark Session
-
-> Skip this step if you're using GCP Dataproc Notebook — SparkSession is already active.
-
-```python
-from pyspark.sql import SparkSession
-
-spark = SparkSession.builder \
-    .appName("flight_price_prediction") \
-    .getOrCreate()
-```
-
-### 2. Load a Small Dataset Locally
-
-Use Parquet if available, or fallback to CSV for basic testing.
-
-```
-# Load from a local Parquet file
-df = spark.read.parquet("path/to/sample_data.parquet")
-
-# Or load from a CSV file
-df = spark.read.csv("path/to/sample_data.csv", header=True, inferSchema=True)
-```
-
-### 3. Apply Data Preprocessing & Feature Engineering
-
-Transform your data using steps such as:
-
-- Drop unnecessary columns (e.g., fareBasisCode, legId)
-- Create `days_until_flight`, `is_peak_season`, etc.
-- Use `StringIndexer` and `OneHotEncoder` for categorical fields
-- Assemble features using VectorAssembler
-
-```
-from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
-from pyspark.sql.functions import datediff, to_date
-
-# Example: Feature - Days Until Flight
-df = df.withColumn("days_until_flight", datediff(to_date("flightDate"), to_date("bookingDate")))
-```
-
-### 4. Train ML Model (e.g., Gradient Boosted Trees)
-
-Use Spark MLlib for training regression models.
-
-```
-from pyspark.ml.regression import GBTRegressor
-from pyspark.ml import Pipeline
-
-# Define your GBT model
-gbt = GBTRegressor(featuresCol="features", labelCol="totalFare", maxIter=50)
-
-# Build your pipeline
-pipeline = Pipeline(stages=[
-    # Add indexers, encoders, vectorAssembler here
-    gbt
-])
-
-# Fit and predict
-model = pipeline.fit(train_df)
-predictions = model.transform(test_df)
-```
-
-**Note**
-
-- This local example is for simulation purposes only.
-- The full pipeline was executed on GCP Dataproc with the complete 82M-row dataset stored in Google Cloud Storage (GCS).
-
-## Skills Demonstrated
-
-- **Big Data Engineering**: Efficient processing of 82 million+ records using Apache Spark and PySpark  
-- **Distributed Computing**: Scalable data pipelines on Google Cloud Dataproc clusters  
-- **Feature Engineering**: Creating meaningful features such as `days_until_flight`, `is_peak_season`, and encoding categorical variables for ML models  
-- **Machine Learning**: Building and evaluating supervised regression models (Linear Regression, Gradient Boosted Trees) using Spark MLlib  
-- **Performance Optimization**: Cluster tuning (executor memory, cores, instances) and throughput measurement across dataset sizes  
-- **Cloud Architecture**: Leveraging Google Cloud Storage (GCS) for data management and Dataproc for cluster orchestration  
-- **Data Storage & Formats**: Utilizing Parquet columnar format for efficient big data storage and querying  
-- **Exploratory Data Analysis (EDA)**: Outlier detection, correlation analysis, and route popularity insights  
-- **End-to-End Pipeline Design**: From raw data ingestion, cleaning, transformation, modeling, to scalable inference  
-
-## Project Setup / Installation
+## Project Setup & Execution
 
 ### Option 1: Run on Google Cloud Platform (Recommended for full dataset)
 
@@ -267,10 +189,41 @@ predictions = model.transform(test_df)
 
 ### Option 2: Run Locally (for small-scale testing)
 
-1. Install **Apache Spark** and **PySpark** on your local machine.  
-2. Clone this repository and navigate to the project folder.  
-3. Prepare a **small sample dataset** (CSV or Parquet) for local simulation.  
-4. Run the local PySpark session and execute preprocessing, feature engineering, and model training as per the example in the **How to Run Locally** section.
+This section provides a simplified local setup to test the pipeline with a small sample dataset.  
+The full pipeline is designed for Google Cloud Dataproc with 82M+ records.
+
+#### 1. Start a local PySpark session:
+
+```python
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.appName("flight_price_prediction").getOrCreate()
+```
+
+#### 2. Load a Small Dataset Locally
+
+```
+df = spark.read.parquet("path/to/sample_data.parquet")  # or CSV with header and schema inference
+```
+
+#### 3. Apply Data Preprocessing & Feature Engineering
+
+- Drop unnecessary columns
+- Create features like days_until_flight
+- Encode categorical variables
+
+#### 4. Train ML Model (e.g., Gradient Boosted Trees)
+
+```
+from pyspark.ml.regression import GBTRegressor
+from pyspark.ml import Pipeline
+
+# Define pipeline stages and train model
+```
+
+### **Note**
+
+- This local example is for simulation purposes only.
+- The full pipeline was executed on GCP Dataproc with the complete 82M-row dataset stored in Google Cloud Storage (GCS).
 
 ---
 
@@ -280,7 +233,7 @@ predictions = model.transform(test_df)
 - Java 8+ (required for Spark)  
 - Apache Spark 3.x  
 - PySpark  
-- Google Cloud SDK (if working on GCP)  
+- Google Cloud SDK (if working on GCP)
 
 ---
 
@@ -293,6 +246,22 @@ pip install pyspark
 # Start pyspark shell
 pyspark
 ```
+---
+
+## Skills Demonstrated
+
+- **Big Data Engineering**: Efficient processing of 82 million+ records using Apache Spark and PySpark  
+- **Distributed Computing**: Scalable data pipelines on Google Cloud Dataproc clusters  
+- **Feature Engineering**: Creating meaningful features such as `days_until_flight`, `is_peak_season`, and encoding categorical variables for ML models  
+- **Machine Learning**: Building and evaluating supervised regression models (Linear Regression, Gradient Boosted Trees) using Spark MLlib  
+- **Performance Optimization**: Cluster tuning (executor memory, cores, instances) and throughput measurement across dataset sizes  
+- **Cloud Architecture**: Leveraging Google Cloud Storage (GCS) for data management and Dataproc for cluster orchestration  
+- **Data Storage & Formats**: Utilizing Parquet columnar format for efficient big data storage and querying  
+- **Exploratory Data Analysis (EDA)**: Outlier detection, correlation analysis, and route popularity insights  
+- **End-to-End Pipeline Design**: From raw data ingestion, cleaning, transformation, modeling, to scalable inference
+- **Data Visualization:** Created charts and dashboards during EDA to communicate insights on fare trends and route popularity.
+
+---
 
 ## Challenges & Learnings
 
