@@ -1,5 +1,7 @@
 # Scalable Flight Price Prediction Using Big Data and Machine Learning
 
+## Overview
+
 This project builds a **scalable, production-ready data pipeline** to predict flight ticket prices using over **82 million** historical bookings from Expedia. It leverages **Apache Spark (PySpark)** and **Google Cloud Platform (GCP)** to demonstrate the full lifecycle of **Big Data Engineering and Machine Learning**, including:
 
 - Ingesting and cleaning large-scale flight booking data
@@ -51,7 +53,7 @@ The end result is a robust, cloud-deployed pipeline capable of handling and anal
     - Flight type (non-stop, connecting)
     - Cabin class (economy, premium, etc.)
 
-This dataset provides a rich and complex foundation for modeling flight fare predictions based on time, route, booking behavior, and seasonality trends.
+This dataset offers a robust foundation for modeling flight fare predictions using temporal, behavioral, and seasonal features.
 
 ---
 
