@@ -285,6 +285,17 @@ pyspark
 - **Cost optimization:** Implement dynamic cluster scaling and spot instances on GCP to reduce compute expenses.  
 - **Comprehensive monitoring:** Add monitoring and logging to track pipeline health and model drift over time.
 
+These enhancements would further mature the pipeline into a production-grade solution capable of supporting real-time, cost-efficient flight pricing intelligence.
+
 ---
 
-These enhancements would further mature the pipeline into a production-grade solution capable of supporting real-time, cost-efficient flight pricing intelligence.
+## Credits
+
+This project was collaboratively developed by:
+
+- [**Aradhana Ramamoorthy**]
+- [**Zhu Hsuan Lin**]  
+- [**Varsha Abraham**]
+
+---
+
